@@ -307,7 +307,7 @@ namespace CoolChat.Server
                     if (!File.Exists(historyFilePath))
                     {
                         File.Create(historyFilePath).Close();
-                    }A
+                    }
 
                     if (!File.Exists(usersFilePath))
                     {
