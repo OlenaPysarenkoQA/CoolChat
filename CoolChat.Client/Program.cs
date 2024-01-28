@@ -2,120 +2,147 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
+using System.Threading.Tasks;
+
 
 namespace CoolChat.Client
 {
     internal class Program
     {
+
         static async Task Main(string[] args)
         {
-            using TcpClient tcpClient = new TcpClient(AddressFamily.InterNetwork);
-
             try
             {
-                UdpClient scanClient = new UdpClient(AddressFamily.InterNetwork);
-                scanClient.Client.ReceiveTimeout = 2000;
-
-                UdpReceiveResult result = default;
-                string message = string.Empty;
-
-                try
-                {
-                    for (int i = 1; i <= 5; i++)
-                    {
-                        Console.WriteLine("Scan network for the chat server. Try " + i + ".");
-                        await scanClient.SendAsync(Encoding.UTF8.GetBytes("SCAN BY COOL CHAT SERVER"), new IPEndPoint(IPAddress.Broadcast, 7701));
-                        try
-                        {
-                            IPEndPoint? remoteEndPoint = null;
-                            //result = await scanClient.ReceiveAsync();
-                            var data = scanClient.Receive(ref remoteEndPoint);
-                            result = new UdpReceiveResult(data, remoteEndPoint);
-                            message = Encoding.UTF8.GetString(result.Buffer);
-
-                            Console.WriteLine($"Scan receive message [{message}] from {remoteEndPoint}");
-
-                            if (!message.StartsWith("YES"))
-                            {
-                                Console.WriteLine("Servers not found!");
-                                return;
-                            }
-                            else
-                            {
-                                break;
-                            }
-                        }
-                        catch
-                        {
-                            Console.WriteLine("Servers not found!");
-                        }
-                    }
-                }
-                catch
-                {
-                    Console.WriteLine("Servers not found!");
-                    return;
-                }
-
-                var port = int.Parse(message.Split(':')[1]);
-                var ip = result.RemoteEndPoint.Address;
-                Console.WriteLine($"Server found at {ip}:{port}");
-
-                tcpClient.Connect(ip, port/*"192.168.1.253", 7700*/);
-
+                using TcpClient tcpClient = new TcpClient();
+                await tcpClient.ConnectAsync(IPAddress.Loopback, 7700);
                 Console.WriteLine("Connection established!");
 
                 using var stream = tcpClient.GetStream();
 
-                var readTask = Read(stream);
-                var writeTask = Write(stream);
+                Console.WriteLine("Enter your username:");
+                var username = Console.ReadLine();
 
-                Task.WaitAll(readTask, writeTask);
+                Console.WriteLine("Enter your password:");
+                var password = Console.ReadLine();
+
+                await RegisterOrLoginAsync(stream, username, password);
+
+                var readerTask = ReadAsync(stream, username);
+                var writerTask = WriteAsync(stream, username);
+
+                await Task.WhenAny(readerTask, writerTask);
+
+                Console.WriteLine("Client was disconnected.");
             }
-            catch
+            catch (Exception ex)
+            {
+                HandleException(ex);
+            }
+        }
+
+        static void HandleException(Exception ex)
+        {
+            Console.WriteLine($"An error occurred: {ex.Message}");
+            if (ex is SocketException || ex is IOException)
             {
                 Console.WriteLine("Client was disconnected");
             }
         }
 
-        static Task Read(NetworkStream stream)
+        static async Task RegisterOrLoginAsync(NetworkStream stream, string username, string password)
+        {
+            var writer = new StreamWriter(stream);
+            var reader = new StreamReader(stream);
+
+            await writer.WriteLineAsync(username);
+            await writer.WriteLineAsync(password);
+            await writer.FlushAsync();
+
+            var response = await reader.ReadLineAsync();
+            Console.WriteLine(response);
+        }
+
+        static Task ReadAsync(NetworkStream stream,string username)
         {
             return Task.Run(async () =>
             {
                 var endPoint = stream.Socket.LocalEndPoint;
                 var reader = new StreamReader(stream);
-                while (true)
+                try
                 {
-                    var msg = await reader.ReadLineAsync();
-                    if (!string.IsNullOrEmpty(msg))
+                    while (true)
                     {
-                        var splittedMsg = msg.Split("@");
-                        if (splittedMsg[0] == endPoint?.ToString())
+                        var msg = await reader.ReadLineAsync();
+                        if (msg == "exit")
                         {
-
+                           break;
                         }
-                        else
+
+                        if (!string.IsNullOrEmpty(msg))
                         {
-                            Console.WriteLine(msg);
+                            var splittedMsg = msg.Split("@");
+                            if (splittedMsg.Length == 2)
+                            {
+                                Console.WriteLine($"[Private from {splittedMsg[0]}]: {splittedMsg[1]}");
+                                SaveMessageToHistory($"[Private from {splittedMsg[0]}]: {splittedMsg[1]}", username);
+                            }
+                            else
+                            {
+                                Console.WriteLine(msg);
+                                SaveMessageToHistory(msg, username);
+                            }
                         }
                     }
+                }
+                catch (IOException)
+                {
+                    Console.WriteLine("Disconnected from the server.");
                 }
             });
         }
 
-        static Task Write(Stream stream)
+        static Task WriteAsync(Stream stream, string username)
         {
             return Task.Run(async () =>
             {
                 var writer = new StreamWriter(stream);
-                while (true)
+                try
                 {
-                    //Console.Write("Enter the text: ");
-                    var text = Console.ReadLine();
-                    await writer.WriteLineAsync(text);
-                    await writer.FlushAsync();
+                    while (true)
+                    {
+                        Console.Write("Enter your message (type 'exit' to quit): ");
+                        var text = Console.ReadLine();
+
+                        await writer.WriteLineAsync($"{username}: {text}");
+                        await writer.FlushAsync();
+
+                        if (text == "exit")
+                        {
+                            break;
+                        }
+
+                        SaveMessageToHistory($"[{username}]: {text}", username);
+                    }
+                }
+                catch (IOException)
+                {
+                    Console.WriteLine("Disconnected from the server.");
                 }
             });
+        }
+
+        static void SaveMessageToHistory(string message, string username)
+        {
+            string directoryPath = @"D:\C# Pro\";
+            string filePath = Path.Combine(directoryPath, $"{username}_chat_history.txt");
+
+            if (!File.Exists(filePath))
+            {
+                File.Create(filePath).Close();
+            }
+
+            File.AppendAllText(filePath, $"{DateTime.Now} - {message}{Environment.NewLine}");
         }
     }
 }

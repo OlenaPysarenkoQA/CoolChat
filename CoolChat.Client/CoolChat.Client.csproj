@@ -7,4 +7,8 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="..\CoolChat.Server\CoolChat.Server.csproj" />
+  </ItemGroup>
+
 </Project>
